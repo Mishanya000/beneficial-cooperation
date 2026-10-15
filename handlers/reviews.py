@@ -1,3 +1,6 @@
+
+import logging
+
 from telebot import TeleBot
 from telebot.types import CallbackQuery
 
@@ -11,28 +14,62 @@ from services.review_service import ReviewService
 from services.discount_service import DiscountService
 
 
+logger = logging.getLogger(__name__)
+
+
 def register_review_handlers(bot: TeleBot) -> None:
     service = ReviewService()
     discount_service = DiscountService()
 
-    @bot.callback_query_handler(func=lambda call: call.data == "reviews")
+    # ==========================================
+    # ГЛАВНАЯ КНОПКА "ОТЗЫВЫ"
+    # ==========================================
+
+    @bot.callback_query_handler(
+        func=lambda call: call.data == "reviews"
+    )
     def show_reviews_menu(call: CallbackQuery) -> None:
+        print("1. КНОПКА ОТЗЫВЫ НАЖАТА")
+
         bot.answer_callback_query(call.id)
 
-        discounts = discount_service.get_active_discounts()
+        try:
+            discounts = discount_service.get_active_discounts()
 
-        if not discounts:
+            print("2. СКИДКИ ПОЛУЧЕНЫ:", len(discounts))
+
+            if not discounts:
+                bot.send_message(
+                    call.message.chat.id,
+                    "😔 Пока нет доступных скидок, "
+                    "для которых можно посмотреть отзывы.",
+                )
+                return
+
+            keyboard = create_reviews_list_keyboard(discounts)
+
+            print("3. КЛАВИАТУРА СОЗДАНА")
+
+            bot.send_message(
+                chat_id=call.message.chat.id,
+                text="⭐ Выбери скидку, чтобы посмотреть отзывы:",
+                reply_markup=keyboard,
+            )
+
+            print("4. СООБЩЕНИЕ ОТПРАВЛЕНО")
+
+        except Exception:
+            logger.exception("Ошибка при открытии меню отзывов")
+
             bot.send_message(
                 call.message.chat.id,
-                "😔 Пока нет скидок, о которых можно оставить отзыв.",
+                "❌ Не удалось открыть отзывы. "
+                "Попробуй ещё раз позже.",
             )
-            return
 
-        bot.send_message(
-            chat_id=call.message.chat.id,
-            text="⭐ Выбери скидку, чтобы посмотреть отзывы:",
-            reply_markup=create_reviews_list_keyboard(discounts),
-        )
+    # ==========================================
+    # ПРОСМОТР ОТЗЫВОВ О СКИДКЕ
+    # ==========================================
 
     @bot.callback_query_handler(
         func=lambda call: call.data.startswith("reviews:")
@@ -77,6 +114,10 @@ def register_review_handlers(bot: TeleBot) -> None:
             reply_markup=create_reviews_keyboard(discount_id),
         )
 
+    # ==========================================
+    # НАЧАЛО ДОБАВЛЕНИЯ ОТЗЫВА
+    # ==========================================
+
     @bot.callback_query_handler(
         func=lambda call: call.data.startswith("review:add:")
     )
@@ -102,6 +143,10 @@ def register_review_handlers(bot: TeleBot) -> None:
             text="⭐ Выбери оценку от 1 до 5:",
             reply_markup=create_rating_keyboard(discount_id),
         )
+
+    # ==========================================
+    # ВЫБОР ОЦЕНКИ
+    # ==========================================
 
     @bot.callback_query_handler(
         func=lambda call: call.data.startswith("review:rating:")
@@ -145,6 +190,10 @@ def register_review_handlers(bot: TeleBot) -> None:
             "отправь символ «-».\n\n"
             "Для отмены отправь /cancel",
         )
+
+    # ==========================================
+    # ОТПРАВКА ЖАЛОБЫ
+    # ==========================================
 
     @bot.callback_query_handler(
         func=lambda call: call.data.startswith("report:add:")

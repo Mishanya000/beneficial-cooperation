@@ -12,6 +12,9 @@ from handlers.map import register_map_handlers
 from handlers.reviews import register_review_handlers
 from handlers.dialogs import register_dialog_handlers
 from handlers.admin import register_admin_handlers
+from handlers.admin_discounts import register_admin_discount_handlers
+from handlers.admin_reports import register_admin_report_handlers
+from handlers.help import register_help_handlers
 
 
 def main() -> None:
@@ -26,8 +29,15 @@ def main() -> None:
     register_search_handlers(bot)
     register_map_handlers(bot)
     register_review_handlers(bot)
-    register_dialog_handlers(bot)
+
+    register_admin_discount_handlers(bot)
+    register_admin_report_handlers(bot)
     register_admin_handlers(bot)
+
+    register_dialog_handlers(bot)
+
+    register_review_handlers(bot)
+    register_help_handlers(bot)
 
     print("Database initialized!")
     print("Bot started successfully!")

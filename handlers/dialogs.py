@@ -1,20 +1,23 @@
+from datetime import date, datetime
+
 from telebot import TeleBot
 from telebot.types import Message
 
+from keyboards.admin import (
+    create_admin_categories_keyboard,
+    create_admin_places_keyboard,
+    create_admin_place_selection,
+)
 from keyboards.discounts import create_discounts_keyboard
 from keyboards.reviews import create_reviews_keyboard
 from keyboards.search import create_search_keyboard
 
+from services.admin_catalog_service import AdminCatalogService
+from services.admin_discount_service import AdminDiscountService
+from services.admin_service import AdminService
 from services.dialog_state import dialog_state
 from services.discount_service import DiscountService
 from services.review_service import ReviewService
-
-from services.admin_service import AdminService
-from services.admin_catalog_service import AdminCatalogService
-from keyboards.admin import (
-    create_admin_categories_keyboard,
-    create_admin_places_keyboard,
-)
 
 
 def register_dialog_handlers(bot: TeleBot) -> None:
@@ -22,6 +25,7 @@ def register_dialog_handlers(bot: TeleBot) -> None:
     review_service = ReviewService()
     admin_service = AdminService()
     catalog_service = AdminCatalogService()
+    admin_discount_service = AdminDiscountService()
 
     @bot.message_handler(commands=["cancel"])
     def cancel_dialog(message: Message) -> None:
@@ -39,11 +43,11 @@ def register_dialog_handlers(bot: TeleBot) -> None:
     @bot.message_handler(
         content_types=["text"],
         func=lambda message: (
-                dialog_state.get(
-                    message.chat.id,
-                    message.from_user.id,
-                ) is not None
-                and not message.text.startswith("/")
+            dialog_state.get(
+                message.chat.id,
+                message.from_user.id,
+            ) is not None
+            and not message.text.startswith("/")
         ),
     )
     def process_dialog(message: Message) -> None:
@@ -58,20 +62,187 @@ def register_dialog_handlers(bot: TeleBot) -> None:
         action = state["action"]
         text = message.text.strip()
 
+        # ==========================================
+        # АДМИНИСТРАТИВНЫЕ ДИАЛОГИ
+        # ==========================================
+
         if action.startswith("admin_"):
             if not admin_service.is_admin(message.from_user.id):
-                dialog_state.clear(message.chat.id, message.from_user.id)
-                bot.send_message(message.chat.id, "⛔ Доступ запрещён.")
+                dialog_state.clear(
+                    message.chat.id,
+                    message.from_user.id,
+                )
+                bot.send_message(
+                    message.chat.id,
+                    "⛔ Доступ запрещён.",
+                )
                 return
+
+            # --------------------------------------
+            # ДОБАВЛЕНИЕ СКИДКИ
+            # --------------------------------------
+
+            if action == "admin_add_discount":
+                step = state["step"]
+                data = state["data"].copy()
+
+                if step == "title":
+                    if not 1 <= len(text) <= 150:
+                        bot.send_message(
+                            message.chat.id,
+                            "❌ Название должно содержать 1–150 символов.",
+                        )
+                        return
+
+                    data["title"] = text
+                    next_step = "description"
+                    prompt = "📝 Введи описание скидки:"
+
+                elif step == "description":
+                    if not 1 <= len(text) <= 2000:
+                        bot.send_message(
+                            message.chat.id,
+                            "❌ Описание должно содержать 1–2000 символов.",
+                        )
+                        return
+
+                    data["description"] = text
+                    next_step = "percent"
+                    prompt = (
+                        "💰 Введи процент скидки (0–100).\n"
+                        "Если процента нет, отправь «-»:"
+                    )
+
+                elif step == "percent":
+                    if text == "-":
+                        percent = None
+                    else:
+                        try:
+                            percent = int(text)
+
+                            if not 0 <= percent <= 100:
+                                raise ValueError
+
+                        except ValueError:
+                            bot.send_message(
+                                message.chat.id,
+                                "❌ Введи целое число от 0 до 100 или «-».",
+                            )
+                            return
+
+                    data["discount_percent"] = percent
+                    next_step = "conditions"
+                    prompt = "📋 Введи условия получения скидки:"
+
+                elif step == "conditions":
+                    if not 1 <= len(text) <= 1000:
+                        bot.send_message(
+                            message.chat.id,
+                            "❌ Условия должны содержать 1–1000 символов.",
+                        )
+                        return
+
+                    data["conditions"] = text
+                    next_step = "valid_until"
+                    prompt = (
+                        "📅 Введи дату окончания в формате ДД.ММ.ГГГГ.\n"
+                        "Для бессрочной скидки отправь «-»:"
+                    )
+
+                elif step == "valid_until":
+                    if text == "-":
+                        valid_until = None
+                    else:
+                        try:
+                            valid_until = datetime.strptime(
+                                text,
+                                "%d.%m.%Y",
+                            ).date()
+
+                            if valid_until < date.today():
+                                raise ValueError
+
+                        except ValueError:
+                            bot.send_message(
+                                message.chat.id,
+                                "❌ Введи сегодняшнюю или будущую дату "
+                                "в формате ДД.ММ.ГГГГ либо «-».",
+                            )
+                            return
+
+                    data["valid_until"] = valid_until
+
+                    places = catalog_service.get_places()
+
+                    if not places:
+                        dialog_state.clear(
+                            message.chat.id,
+                            message.from_user.id,
+                        )
+                        bot.send_message(
+                            message.chat.id,
+                            "❌ Сначала добавь хотя бы одно заведение.",
+                        )
+                        return
+
+                    dialog_state.set(
+                        message.chat.id,
+                        message.from_user.id,
+                        {
+                            "action": "admin_add_discount",
+                            "step": "place",
+                            "data": data,
+                        },
+                    )
+
+                    bot.send_message(
+                        message.chat.id,
+                        "🏪 Выбери заведение:",
+                        reply_markup=create_admin_place_selection(places),
+                    )
+                    return
+
+                else:
+                    bot.send_message(
+                        message.chat.id,
+                        "ℹ️ Сейчас нужно выбрать заведение "
+                        "или категорию кнопкой под сообщением.\n"
+                        "Для отмены отправь /cancel.",
+                    )
+                    return
+
+                dialog_state.set(
+                    message.chat.id,
+                    message.from_user.id,
+                    {
+                        "action": "admin_add_discount",
+                        "step": next_step,
+                        "data": data,
+                    },
+                )
+
+                bot.send_message(message.chat.id, prompt)
+                return
+
+            # --------------------------------------
+            # ДОБАВЛЕНИЕ КАТЕГОРИИ
+            # --------------------------------------
 
             if action == "admin_add_category":
                 try:
                     category = catalog_service.add_category(text)
+
                 except ValueError as error:
-                    bot.send_message(message.chat.id, f"❌ {error}")
+                    bot.send_message(
+                        message.chat.id,
+                        f"❌ {error}",
+                    )
                     return
 
-                dialog_state.clear(message.chat.id, message.from_user.id)
+                dialog_state.clear(
+                    message.chat.id,
+                    message.from_user.id,
+                )
 
                 bot.send_message(
                     message.chat.id,
@@ -79,6 +250,10 @@ def register_dialog_handlers(bot: TeleBot) -> None:
                     reply_markup=create_admin_categories_keyboard(),
                 )
                 return
+
+            # --------------------------------------
+            # ДОБАВЛЕНИЕ ЗАВЕДЕНИЯ
+            # --------------------------------------
 
             if action == "admin_add_place":
                 step = state["step"]
@@ -88,7 +263,7 @@ def register_dialog_handlers(bot: TeleBot) -> None:
                     if not 1 <= len(text) <= 150:
                         bot.send_message(
                             message.chat.id,
-                            "❌ Название должно содержать от 1 до 150 символов.",
+                            "❌ Название должно содержать 1–150 символов.",
                         )
                         return
 
@@ -114,7 +289,7 @@ def register_dialog_handlers(bot: TeleBot) -> None:
                     if not 1 <= len(text) <= 300:
                         bot.send_message(
                             message.chat.id,
-                            "❌ Адрес должен содержать от 1 до 300 символов.",
+                            "❌ Адрес должен содержать 1–300 символов.",
                         )
                         return
 
@@ -189,11 +364,18 @@ def register_dialog_handlers(bot: TeleBot) -> None:
                             latitude=data["latitude"],
                             longitude=longitude,
                         )
+
                     except ValueError as error:
-                        bot.send_message(message.chat.id, f"❌ {error}")
+                        bot.send_message(
+                            message.chat.id,
+                            f"❌ {error}",
+                        )
                         return
 
-                    dialog_state.clear(message.chat.id, message.from_user.id)
+                    dialog_state.clear(
+                        message.chat.id,
+                        message.from_user.id,
+                    )
 
                     bot.send_message(
                         message.chat.id,
@@ -203,14 +385,26 @@ def register_dialog_handlers(bot: TeleBot) -> None:
                     )
                     return
 
+                bot.send_message(
+                    message.chat.id,
+                    "❌ Неизвестный шаг добавления заведения.",
+                )
+                return
+
             bot.send_message(
                 message.chat.id,
                 "❌ Неизвестное действие администратора.",
             )
-            dialog_state.clear(message.chat.id, message.from_user.id)
+            dialog_state.clear(
+                message.chat.id,
+                message.from_user.id,
+            )
             return
 
-        # Поиск по названию
+        # ==========================================
+        # ПОИСК СКИДОК
+        # ==========================================
+
         if action == "search_name":
             if not text:
                 bot.send_message(
@@ -221,7 +415,6 @@ def register_dialog_handlers(bot: TeleBot) -> None:
 
             discounts = discount_service.search_discounts(text)
 
-        # Поиск по проценту
         elif action == "search_percent":
             try:
                 percent = int(text)
@@ -236,11 +429,12 @@ def register_dialog_handlers(bot: TeleBot) -> None:
                 )
                 return
 
-            discounts = discount_service.get_discounts_by_percent(
-                percent
-            )
+            discounts = discount_service.get_discounts_by_percent(percent)
 
-        # Отзыв или жалоба
+        # ==========================================
+        # ОТЗЫВЫ И ЖАЛОБЫ
+        # ==========================================
+
         elif action in ("review", "report"):
             if len(text) > 1000:
                 bot.send_message(
@@ -284,8 +478,8 @@ def register_dialog_handlers(bot: TeleBot) -> None:
             )
 
             bot.send_message(
-                chat_id=message.chat.id,
-                text=response,
+                message.chat.id,
+                response,
                 reply_markup=create_reviews_keyboard(
                     state["discount_id"]
                 ),
@@ -293,9 +487,20 @@ def register_dialog_handlers(bot: TeleBot) -> None:
             return
 
         else:
+            dialog_state.clear(
+                message.chat.id,
+                message.from_user.id,
+            )
+            bot.send_message(
+                message.chat.id,
+                "❌ Неизвестное действие.",
+            )
             return
 
-        # Результаты поиска
+        # ==========================================
+        # РЕЗУЛЬТАТЫ ПОИСКА
+        # ==========================================
+
         dialog_state.clear(
             message.chat.id,
             message.from_user.id,
@@ -303,13 +508,13 @@ def register_dialog_handlers(bot: TeleBot) -> None:
 
         if discounts:
             bot.send_message(
-                chat_id=message.chat.id,
-                text=f"🔎 Найдено скидок: {len(discounts)}",
+                message.chat.id,
+                f"🔎 Найдено скидок: {len(discounts)}",
                 reply_markup=create_discounts_keyboard(discounts),
             )
         else:
             bot.send_message(
-                chat_id=message.chat.id,
-                text="😔 По твоему запросу ничего не найдено.",
+                message.chat.id,
+                "😔 По твоему запросу ничего не найдено.",
                 reply_markup=create_search_keyboard(),
             )
