@@ -14,6 +14,7 @@ from handlers.admin import register_admin_handlers
 from handlers.admin_discounts import register_admin_discount_handlers
 from handlers.admin_reports import register_admin_report_handlers
 from handlers.help import register_help_handlers
+from handlers.fallback import register_fallback_handlers
 
 
 def main() -> None:
@@ -34,8 +35,9 @@ def main() -> None:
 
     register_dialog_handlers(bot)
 
-    register_review_handlers(bot)
     register_help_handlers(bot)
+
+    register_fallback_handlers(bot)
 
     print("Database initialized!")
     print("Bot started successfully!")
