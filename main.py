@@ -2,7 +2,6 @@ import telebot
 
 from config import BOT_TOKEN
 from database import init_db
-from database.seed import seed_database
 
 from handlers.start import register_start_handlers
 from handlers.discounts import register_discount_handlers
@@ -19,7 +18,6 @@ from handlers.help import register_help_handlers
 
 def main() -> None:
     init_db()
-    seed_database()
 
     bot = telebot.TeleBot(BOT_TOKEN)
 
