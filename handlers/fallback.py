@@ -17,26 +17,15 @@ def register_fallback_handlers(bot: TeleBot) -> None:
             message.from_user.id,
         )
 
-        # Если бот ожидает текст в диалоге,
-        # не отправляем сообщение-заглушку.
         if state is not None:
             return
 
-        # Команды не считаем обычным текстом.
         if message.text.startswith("/"):
             return
 
-        if admin_service.is_admin(message.from_user.id):
-            bot.send_message(
-                message.chat.id,
-                "🤖 Я не умею отвечать на произвольные сообщения.\n\n"
-                "Пожалуйста, выбери действие в меню 👇",
-                reply_markup=create_admin_keyboard(),
-            )
-        else:
-            bot.send_message(
-                message.chat.id,
-                "🤖 Я пока не умею поддерживать переписку.\n\n"
-                "Пожалуйста, выбери интересующий раздел меню 👇",
-                reply_markup=create_main_menu(),
-            )
+        bot.send_message(
+            message.chat.id,
+            "🤖 Я не умею отвечать на произвольные сообщения.\n\n"
+            "Пожалуйста, выбери действие в меню 👇",
+            reply_markup=create_main_menu(),
+        )
